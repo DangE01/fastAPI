@@ -170,6 +170,10 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# ChromaDB — local vector store (auto-generated, binary, not meant for version control)
+# Regenerate by re-running POST /ingest on your documents
+chroma_db/
+
 # PyPI configuration file
 .pypirc
 

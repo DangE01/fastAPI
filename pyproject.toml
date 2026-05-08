@@ -1,0 +1,26 @@
+[project]
+name = "fastapi-rag-template"
+version = "1.0.0"
+description = "A learning template for Retrieval-Augmented Generation (RAG) with FastAPI and Ollama"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "ollama",
+    "chromadb",
+    "langchain-text-splitters",
+    "pydantic-settings",
+    "python-multipart",
+    "pypdf",
+    # Pin onnxruntime (a chromadb dependency) to a version with Intel macOS wheels.
+    # onnxruntime >= 1.21 dropped support for macos x86_64 (Intel Macs).
+    "onnxruntime>=1.14.0,<1.21.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx",          # for testing FastAPI endpoints with TestClient
+    "pytest",         # test runner
+    "pytest-asyncio", # async test support
+]

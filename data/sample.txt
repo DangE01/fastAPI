@@ -1,0 +1,100 @@
+# Introduction to Retrieval-Augmented Generation (RAG)
+
+Retrieval-Augmented Generation (RAG) is a technique that enhances Large Language
+Models (LLMs) by giving them access to external knowledge at query time — without
+retraining the model.
+
+## Why RAG?
+
+Standard LLMs are trained on a fixed dataset and have a knowledge cutoff. They
+cannot know about:
+
+- Your private company documents
+- Recently published research papers
+- Your personal notes or custom knowledge base
+- Any information that postdates their training cutoff
+
+RAG solves this by retrieving relevant passages from your documents and including
+them in the LLM's prompt. The model then generates answers grounded in YOUR data.
+
+## How RAG Works
+
+The RAG pipeline has two phases:
+
+### Phase 1: Ingestion
+
+Before users can ask questions, documents must be indexed:
+
+1. **Load** the document (PDF, text file, web page, etc.)
+2. **Chunk** it into smaller passages (typically 200–1000 characters each)
+3. **Embed** each chunk — convert it to a vector using an embedding model
+4. **Store** the vectors and raw text in a vector database
+
+This happens offline, before any queries arrive.
+
+### Phase 2: Query
+
+When a user asks a question:
+
+1. **Embed** the question using the same embedding model
+2. **Search** the vector database for chunks similar to the question
+3. **Retrieve** the top-K most relevant chunks
+4. **Prompt** the LLM with: "Given these passages: [...] Answer: {question}"
+5. **Return** the LLM's answer (plus the source passages for transparency)
+
+## Why Embeddings?
+
+An embedding is a list of numbers (a vector) that captures the *meaning* of text.
+
+For example, these two sentences have very different words but similar embeddings:
+
+  "The dog sprinted after the ball."
+  "A puppy chased a toy."
+
+Because embeddings capture semantics, we can find relevant passages even when
+the user's question doesn't share exact keywords with the document.
+
+## What Is a Vector Database?
+
+A vector database stores embeddings and allows efficient similarity search —
+finding the vectors closest to a query vector. Unlike SQL queries that match
+exact values, vector search finds semantic neighbors.
+
+Common choices: ChromaDB (local), Pinecone (cloud), Weaviate, Qdrant, pgvector.
+
+This template uses ChromaDB — it's free, local, and requires zero configuration.
+
+## The Grounding Principle
+
+The key RAG constraint: the LLM is instructed to answer ONLY from the retrieved
+passages, not from its general training knowledge. This prevents hallucination
+and makes the system's answers traceable back to your actual documents.
+
+## Key Parameters
+
+**Chunk Size**
+How many characters per chunk. Smaller chunks → more precise retrieval but
+less context. Larger chunks → more context but less precise matching.
+Rule of thumb: 300–800 characters works well for most prose.
+
+**Chunk Overlap**
+How many characters adjacent chunks share. Prevents information loss at
+chunk boundaries. Typical overlap: 10–15% of chunk size.
+
+**Top-K**
+How many chunks to retrieve per query. More chunks = more context for the LLM,
+but also more noise and a longer prompt. Typical values: 3–6.
+
+## Limitations of RAG
+
+- Quality of retrieval depends heavily on the embedding model
+- Very long documents may require hierarchical chunking strategies
+- RAG cannot answer questions that require reasoning across many passages
+- The LLM may still occasionally ignore the retrieved context
+
+## Further Reading
+
+- Lewis et al. (2020) — "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks" (the original RAG paper)
+- LlamaIndex documentation — https://docs.llamaindex.ai
+- ChromaDB documentation — https://docs.trychroma.com
+- Ollama model library — https://ollama.com/library

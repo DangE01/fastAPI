@@ -26,7 +26,10 @@ The "sources" in the response are the actual chunks retrieved from ChromaDB.
 Returning them lets you verify that the answer is grounded in your documents.
 """
 
+import json
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 from app.models import ChatRequest, ChatResponse, Source
@@ -120,4 +123,118 @@ async def chat(request: ChatRequest):
         answer=answer,
         sources=sources,
         model_used=settings.ollama_chat_model,
+    )
+
+
+@router.post("/stream", summary="Stream an answer (Server-Sent Events)")
+async def chat_stream(request: ChatRequest):
+    """
+    ## 💬 Streaming Chat (SSE)
+
+    Identical RAG pipeline to `POST /chat/`, but the LLM's answer is streamed
+    back token-by-token using **Server-Sent Events** instead of waiting for the
+    full response.
+
+    ### SSE Wire Format
+
+    ```
+    data: Hello\n\n
+    data:  world\n\n
+    data: [DONE]\n\n
+    data: {"sources": [...], "model_used": "llama3.2"}\n\n
+    ```
+
+    - Every token is a `data:` line.
+    - `[DONE]` signals the end of the token stream.
+    - The final `data:` line carries a JSON object with `sources` + `model_used`
+      so the client can still display citations.
+
+    ### Why SSE over WebSockets?
+    SSE is simpler for one-directional push (server → client). The browser's
+    native `EventSource` API handles reconnection automatically. WebSockets
+    are better when you also need client → server messages mid-stream.
+    """
+    settings = get_settings()
+
+    # ── Steps 5-6: Embed question + retrieve chunks (same as /chat/) ──────────
+    query_embedding = embedder.embed_text(request.question)
+
+    try:
+        collection = vector_store.get_or_create_collection(request.collection_name)
+        count = collection.count()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error accessing collection '{request.collection_name}': {exc}",
+        ) from exc
+
+    if count == 0:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Collection '{request.collection_name}' exists but is empty. "
+                "Please ingest a document first via POST /ingest."
+            ),
+        )
+
+    results = vector_store.query_collection(
+        collection=collection,
+        query_embedding=query_embedding,
+        top_k=min(settings.top_k_results, count),
+    )
+
+    retrieved_docs: list[str] = results["documents"][0]
+    distances: list[float] = results["distances"][0]
+    metadatas: list[dict] = results["metadatas"][0]
+
+    if not retrieved_docs:
+        raise HTTPException(
+            status_code=404,
+            detail="No relevant chunks found. Try rephrasing your question.",
+        )
+
+    sources = [
+        Source(content=doc, distance=dist, metadata=meta)
+        for doc, dist, meta in zip(retrieved_docs, distances, metadatas)
+    ]
+
+    # ── Step 7-8: Stream tokens from the LLM ─────────────────────────────────
+    async def event_stream():
+        """
+        Inner async generator that yields SSE-formatted strings.
+
+        SSE format rules (RFC 8895):
+          - Each message is one or more "field: value" lines.
+          - Messages are separated by a blank line (\n\n).
+          - The "data" field carries the payload.
+          - Clients ignore unknown field names, so this is safe to extend.
+        """
+        async for token in llm.generate_answer_stream(
+            question=request.question,
+            context_chunks=retrieved_docs,
+        ):
+            # Escape newlines inside a token so we don't break the SSE framing.
+            # Real tokens rarely contain \n, but LLMs can emit them mid-stream.
+            safe_token = token.replace("\n", "\\n")
+            yield f"data: {safe_token}\n\n"
+
+        # Signal end of token stream
+        yield "data: [DONE]\n\n"
+
+        # Send sources + model as a final metadata event so the client can
+        # display citations even in streaming mode.
+        metadata_payload = json.dumps({
+            "sources": [s.model_dump() for s in sources],
+            "model_used": settings.ollama_chat_model,
+        })
+        yield f"data: {metadata_payload}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            # Prevent buffering — critical for SSE to feel real-time.
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disables nginx buffering if behind a proxy
+        },
     )

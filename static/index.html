@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG Explorer</title>
+  <meta name="description" content="Chat with your documents using local RAG — FastAPI + Ollama + ChromaDB" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #07071a;
+      --s0:      #0c0c22;
+      --s1:      #12122e;
+      --s2:      #1a1a3a;
+      --border:  rgba(130, 100, 255, 0.12);
+      --borderh: rgba(130, 100, 255, 0.35);
+      --p1:      #7c3aed;
+      --p2:      #4f46e5;
+      --p3:      #3b82f6;
+      --glow:    rgba(124, 58, 237, 0.28);
+      --t1:      #eeeeff;
+      --t2:      #9090c0;
+      --t3:      #50508a;
+      --ok:      #10b981;
+      --err:     #ef4444;
+      --warn:    #f59e0b;
+      --r:       10px;
+      --rlg:     16px;
+    }
+
+    html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--t1); overflow: hidden; }
+
+    /* ── Layout ── */
+    #app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      background: var(--s0);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 18px;
+      padding: 20px 16px;
+      overflow-y: auto;
+    }
+
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-icon {
+      width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+      background: linear-gradient(135deg, var(--p1), var(--p3));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; box-shadow: 0 0 18px var(--glow);
+    }
+    .logo-name {
+      font-size: 14px; font-weight: 700; letter-spacing: -0.3px;
+      background: linear-gradient(90deg, var(--p1), var(--p3));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .logo-sub { font-size: 10px; color: var(--t3); text-transform: uppercase; letter-spacing: 0.6px; }
+
+    .divider { height: 1px; background: var(--border); flex-shrink: 0; }
+
+    .label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--t3); margin-bottom: 8px; }
+
+    /* Drop Zone */
+    #drop-zone {
+      border: 2px dashed var(--borderh);
+      border-radius: var(--rlg);
+      padding: 22px 14px;
+      text-align: center;
+      cursor: pointer;
+      position: relative;
+      background: var(--s1);
+      transition: all 0.2s;
+    }
+    #drop-zone:hover, #drop-zone.over {
+      border-color: var(--p1);
+      background: rgba(124,58,237,0.08);
+      box-shadow: 0 0 22px var(--glow);
+    }
+    #drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .drop-icon { font-size: 26px; margin-bottom: 6px; }
+    .drop-title { font-size: 12px; font-weight: 600; }
+    .drop-sub { font-size: 11px; color: var(--t3); margin-top: 3px; }
+
+    /* File pill */
+    #file-pill { display: none; align-items: center; gap: 8px; background: rgba(124,58,237,0.12); border: 1px solid var(--borderh); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+    #file-pill.on { display: flex; }
+    #file-pill .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+    #file-pill .fsize { color: var(--t3); font-size: 11px; white-space: nowrap; }
+    #file-pill button { background: none; border: none; cursor: pointer; color: var(--t3); font-size: 14px; line-height: 1; padding: 0; }
+    #file-pill button:hover { color: var(--err); }
+
+    /* Collection section */
+    .field label { display: block; font-size: 11px; font-weight: 500; color: var(--t2); margin-bottom: 6px; }
+    .field input, .field select {
+      width: 100%; background: var(--s2); border: 1px solid var(--border);
+      border-radius: var(--r); padding: 9px 11px; font-size: 13px;
+      font-family: inherit; color: var(--t1); outline: none; transition: border-color 0.2s;
+    }
+    .field input:focus, .field select:focus { border-color: var(--p1); }
+    .field input::placeholder { color: var(--t3); }
+
+    /* Collection picker row */
+    .col-row { display: flex; gap: 6px; align-items: flex-end; }
+    .col-row .field { flex: 1; }
+    #refresh-cols {
+      height: 36px; width: 36px; flex-shrink: 0;
+      background: var(--s2); border: 1px solid var(--border); border-radius: var(--r);
+      color: var(--t2); font-size: 14px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s; margin-bottom: 0;
+    }
+    #refresh-cols:hover { border-color: var(--p1); color: var(--p1); }
+    #refresh-cols.spinning { animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* New collection toggle */
+    #new-col-row { display: none; gap: 6px; margin-top: 6px; }
+    #new-col-row.on { display: flex; }
+    #new-col-input {
+      flex: 1; background: var(--s2); border: 1px solid var(--borderh);
+      border-radius: var(--r); padding: 9px 11px; font-size: 13px;
+      font-family: inherit; color: var(--t1); outline: none;
+    }
+    #new-col-input:focus { border-color: var(--p1); }
+    #new-col-input::placeholder { color: var(--t3); }
+    #cancel-new-col {
+      background: var(--s2); border: 1px solid var(--border); border-radius: var(--r);
+      color: var(--t3); font-size: 12px; padding: 0 10px; cursor: pointer;
+      font-family: inherit;
+    }
+    #cancel-new-col:hover { color: var(--err); border-color: var(--err); }
+
+    /* Ingest button */
+    #ingest-btn {
+      width: 100%; padding: 11px; border: none; border-radius: var(--r);
+      background: linear-gradient(135deg, var(--p1), var(--p3));
+      color: #fff; font-family: inherit; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s; box-shadow: 0 0 20px var(--glow);
+    }
+    #ingest-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 28px rgba(124,58,237,0.5); }
+    #ingest-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    /* Status */
+    #ingest-status { display: none; padding: 9px 11px; border-radius: var(--r); font-size: 12px; line-height: 1.5; }
+    #ingest-status.ok  { display: block; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: var(--ok); }
+    #ingest-status.err { display: block; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--err); }
+
+    /* Files list */
+    #files-list { display: flex; flex-direction: column; gap: 6px; }
+    .fentry {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; background: var(--s1);
+      border: 1px solid var(--border); border-radius: 8px; font-size: 11px;
+    }
+    .fentry-icon { font-size: 13px; }
+    .fentry-info { flex: 1; min-width: 0; }
+    .fentry-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--t1); }
+    .fentry-meta { color: var(--t3); margin-top: 1px; }
+    .fentry-badge { background: rgba(16,185,129,0.15); color: var(--ok); border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 600; white-space: nowrap; }
+
+    /* ── Chat Panel ── */
+    #chat { display: flex; flex-direction: column; background: var(--bg); }
+
+    #chat-header {
+      padding: 14px 22px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+      background: var(--s0); flex-shrink: 0;
+    }
+    #chat-header h2 { font-size: 14px; font-weight: 600; }
+    #col-badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: rgba(124,58,237,0.15); border: 1px solid var(--borderh); color: var(--p1); font-weight: 600; }
+    #model-badge { font-size: 10px; padding: 3px 8px; border-radius: 999px; background: var(--s2); border: 1px solid var(--border); color: var(--t3); }
+
+    /* Stream badge */
+    #stream-badge {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; padding: 3px 9px; border-radius: 999px;
+      border: 1px solid var(--border); color: var(--t3);
+      background: var(--s2); cursor: pointer; user-select: none;
+      transition: all 0.2s;
+    }
+    #stream-badge .dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--t3);
+      transition: background 0.2s;
+    }
+    #stream-badge.active { border-color: var(--ok); color: var(--ok); }
+    #stream-badge.active .dot { background: var(--ok); animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+    /* Messages */
+    #messages { flex: 1; overflow-y: auto; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px; }
+    #messages::-webkit-scrollbar { width: 4px; }
+    #messages::-webkit-scrollbar-track { background: transparent; }
+    #messages::-webkit-scrollbar-thumb { background: var(--s2); border-radius: 4px; }
+
+    /* Empty state */
+    #empty {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 10px;
+      color: var(--t3); text-align: center;
+    }
+    #empty .big { font-size: 40px; }
+    #empty p { font-size: 13px; line-height: 1.6; max-width: 280px; }
+    #empty p strong { color: var(--t2); }
+
+    /* Message bubbles */
+    .msg { display: flex; flex-direction: column; gap: 6px; max-width: 78%; }
+    .msg.user { align-self: flex-end; }
+    .msg.ai   { align-self: flex-start; }
+
+    .bubble {
+      padding: 11px 14px; border-radius: var(--rlg);
+      font-size: 13px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+    }
+    .msg.user .bubble { background: linear-gradient(135deg, var(--p1), var(--p2)); color: #fff; border-bottom-right-radius: 4px; }
+    .msg.ai   .bubble { background: var(--s1); border: 1px solid var(--border); color: var(--t1); border-bottom-left-radius: 4px; }
+
+    /* Streaming cursor */
+    .cursor {
+      display: inline-block; width: 2px; height: 1em;
+      background: var(--p1); margin-left: 1px; vertical-align: text-bottom;
+      animation: blink 0.8s step-end infinite;
+    }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+    /* Typing indicator */
+    .typing { display: flex; align-items: center; gap: 4px; padding: 14px; }
+    .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--p1); animation: bounce 1.3s infinite; }
+    .typing span:nth-child(2) { animation-delay: 0.15s; }
+    .typing span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes bounce { 0%,60%,100% { transform: translateY(0); opacity: 0.3; } 30% { transform: translateY(-6px); opacity: 1; } }
+
+    /* Sources */
+    .sources { margin-top: 2px; }
+    .sources-toggle {
+      display: flex; align-items: center; gap: 5px;
+      background: none; border: none; cursor: pointer;
+      font-size: 11px; color: var(--t3); font-family: inherit;
+      padding: 3px 0; transition: color 0.15s;
+    }
+    .sources-toggle:hover { color: var(--p1); }
+    .sources-toggle .arrow { font-size: 9px; transition: transform 0.2s; display: inline-block; }
+    .sources-toggle.open .arrow { transform: rotate(90deg); }
+
+    .sources-list { display: none; flex-direction: column; gap: 6px; margin-top: 8px; }
+    .sources-list.on { display: flex; }
+
+    .src-item {
+      background: var(--s1); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px;
+      font-size: 11px; display: flex; flex-direction: column; gap: 5px;
+    }
+    .src-top { display: flex; align-items: center; gap: 6px; }
+    .src-meta { color: var(--t3); font-size: 10px; }
+    .src-text { color: var(--t2); line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .dist-badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; white-space: nowrap; }
+    .dist-good { background: rgba(16,185,129,0.15); color: var(--ok); }
+    .dist-mid  { background: rgba(245,158,11,0.15); color: var(--warn); }
+    .dist-far  { background: rgba(239,68,68,0.15); color: var(--err); }
+
+    /* Input bar */
+    #input-bar {
+      padding: 16px 22px; border-top: 1px solid var(--border);
+      display: flex; gap: 10px; flex-shrink: 0;
+      background: var(--s0);
+    }
+    #question {
+      flex: 1; background: var(--s2); border: 1px solid var(--border);
+      border-radius: var(--r); padding: 11px 14px;
+      font-size: 13px; font-family: inherit; color: var(--t1);
+      outline: none; resize: none; transition: border-color 0.2s;
+      height: 44px; line-height: 1.4;
+    }
+    #question:focus { border-color: var(--p1); }
+    #question::placeholder { color: var(--t3); }
+    #question:disabled { opacity: 0.4; }
+
+    #send-btn {
+      width: 44px; height: 44px; border-radius: var(--r); border: none;
+      background: linear-gradient(135deg, var(--p1), var(--p3));
+      color: #fff; font-size: 18px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 16px var(--glow); transition: all 0.2s; flex-shrink: 0;
+    }
+    #send-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 22px rgba(124,58,237,0.5); }
+    #send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Sidebar ── -->
+  <aside id="sidebar">
+    <div class="logo">
+      <div class="logo-icon">🔍</div>
+      <div>
+        <div class="logo-name">RAG Explorer</div>
+        <div class="logo-sub">Ollama · ChromaDB · FastAPI</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Upload -->
+    <div>
+      <div class="label">1 — Upload Document</div>
+      <div id="drop-zone">
+        <input type="file" id="file-input" accept=".txt,.pdf" />
+        <div class="drop-icon">📄</div>
+        <div class="drop-title">Drop file here or click to browse</div>
+        <div class="drop-sub">.txt or .pdf supported</div>
+      </div>
+    </div>
+
+    <div id="file-pill">
+      <span>📎</span>
+      <span class="fname" id="pill-name"></span>
+      <span class="fsize" id="pill-size"></span>
+      <button id="clear-file" title="Remove">✕</button>
+    </div>
+
+    <!-- Collection picker (Phase 2) -->
+    <div>
+      <div class="label">2 — Collection</div>
+      <div class="col-row">
+        <div class="field" style="margin-bottom:0">
+          <select id="col-select">
+            <option value="default">default</option>
+          </select>
+        </div>
+        <button id="refresh-cols" title="Refresh collections">↻</button>
+      </div>
+      <!-- New collection name input, shown when user picks "+ New" -->
+      <div id="new-col-row">
+        <input id="new-col-input" type="text" placeholder="new-collection-name" maxlength="40" />
+        <button id="cancel-new-col">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Ingest -->
+    <button id="ingest-btn" disabled>⚡ Ingest Document</button>
+    <div id="ingest-status"></div>
+
+    <div class="divider"></div>
+
+    <!-- Ingested files this session -->
+    <div>
+      <div class="label">Ingested This Session</div>
+      <div id="files-list">
+        <div style="font-size:11px;color:var(--t3);">No files ingested yet.</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Chat Panel ── -->
+  <main id="chat">
+    <div id="chat-header">
+      <h2>Chat</h2>
+      <span id="col-badge">default</span>
+      <span id="model-badge">llama3.2</span>
+      <!-- Phase 3: streaming toggle -->
+      <div id="stream-badge" title="Toggle streaming mode">
+        <span class="dot"></span>
+        <span id="stream-label">Streaming OFF</span>
+      </div>
+    </div>
+
+    <div id="messages">
+      <div id="empty">
+        <div class="big">💬</div>
+        <p>
+          <strong>Ingest a document first</strong>, then ask anything about it.<br/>
+          Your answers will include <strong>source citations</strong> so you can verify the context used.
+        </p>
+      </div>
+    </div>
+
+    <div id="input-bar">
+      <textarea id="question" placeholder="Ask something about your document…" disabled rows="1"></textarea>
+      <button id="send-btn" disabled title="Send">➤</button>
+    </div>
+  </main>
+
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  let selectedFile = null;
+  let busy = false;           // ingestion or chat in progress
+  let hasIngested = false;    // at least one doc ingested
+  let streamingEnabled = false; // Phase 3: streaming toggle
+
+  // ── DOM refs ───────────────────────────────────────────────────────────────
+  const dropZone     = document.getElementById('drop-zone');
+  const fileInput    = document.getElementById('file-input');
+  const filePill     = document.getElementById('file-pill');
+  const pillName     = document.getElementById('pill-name');
+  const pillSize     = document.getElementById('pill-size');
+  const clearBtn     = document.getElementById('clear-file');
+  const colSelect    = document.getElementById('col-select');
+  const colBadge     = document.getElementById('col-badge');
+  const refreshBtn   = document.getElementById('refresh-cols');
+  const newColRow    = document.getElementById('new-col-row');
+  const newColInput  = document.getElementById('new-col-input');
+  const cancelNewCol = document.getElementById('cancel-new-col');
+  const ingestBtn    = document.getElementById('ingest-btn');
+  const ingestStatus = document.getElementById('ingest-status');
+  const filesList    = document.getElementById('files-list');
+  const messages     = document.getElementById('messages');
+  const emptyState   = document.getElementById('empty');
+  const questionEl   = document.getElementById('question');
+  const sendBtn      = document.getElementById('send-btn');
+  const modelBadge   = document.getElementById('model-badge');
+  const streamBadge  = document.getElementById('stream-badge');
+  const streamLabel  = document.getElementById('stream-label');
+
+  // ── Phase 2: Collections Dropdown ─────────────────────────────────────────
+  // Fetches GET /collections and populates the <select>.
+  // Called on page load and after every successful ingest.
+
+  async function loadCollections() {
+    refreshBtn.classList.add('spinning');
+    try {
+      const res = await fetch('/collections/');
+      if (!res.ok) return;
+      const cols = await res.json(); // [{name, count}, ...]
+
+      const current = getSelectedCollection();
+
+      // Rebuild options
+      colSelect.innerHTML = '';
+
+      if (cols.length === 0) {
+        // No collections yet — show a placeholder
+        const opt = document.createElement('option');
+        opt.value = 'default';
+        opt.textContent = 'default (new)';
+        colSelect.appendChild(opt);
+      } else {
+        cols.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.name;
+          opt.textContent = `${c.name}  (${c.count} chunks)`;
+          colSelect.appendChild(opt);
+        });
+      }
+
+      // Always add a "+ New collection" option at the bottom
+      const newOpt = document.createElement('option');
+      newOpt.value = '__new__';
+      newOpt.textContent = '+ New collection…';
+      colSelect.appendChild(newOpt);
+
+      // Restore previous selection if it still exists
+      if (current && [...colSelect.options].some(o => o.value === current)) {
+        colSelect.value = current;
+      }
+
+      syncColBadge();
+    } catch (e) {
+      console.warn('Could not load collections:', e);
+    } finally {
+      refreshBtn.classList.remove('spinning');
+    }
+  }
+
+  function getSelectedCollection() {
+    if (colSelect.value === '__new__') {
+      return newColInput.value.trim() || 'default';
+    }
+    return colSelect.value || 'default';
+  }
+
+  function syncColBadge() {
+    colBadge.textContent = getSelectedCollection();
+  }
+
+  colSelect.addEventListener('change', () => {
+    if (colSelect.value === '__new__') {
+      newColRow.classList.add('on');
+      newColInput.focus();
+    } else {
+      newColRow.classList.remove('on');
+    }
+    syncColBadge();
+  });
+
+  newColInput.addEventListener('input', syncColBadge);
+
+  cancelNewCol.addEventListener('click', () => {
+    newColRow.classList.remove('on');
+    // Revert to first real option
+    if (colSelect.options.length > 1) {
+      colSelect.selectedIndex = 0;
+    }
+    syncColBadge();
+  });
+
+  refreshBtn.addEventListener('click', loadCollections);
+
+  // Load collections on startup
+  loadCollections();
+
+  // ── File selection ─────────────────────────────────────────────────────────
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) selectFile(fileInput.files[0]); });
+
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if (f) selectFile(f);
+  });
+
+  function selectFile(f) {
+    if (!f.name.match(/\.(txt|pdf)$/i)) {
+      showStatus('Only .txt and .pdf files are supported.', 'err');
+      return;
+    }
+    selectedFile = f;
+    pillName.textContent = f.name;
+    pillSize.textContent = formatSize(f.size);
+    filePill.classList.add('on');
+    ingestBtn.disabled = false;
+    hideStatus();
+  }
+
+  clearBtn.addEventListener('click', () => {
+    selectedFile = null;
+    fileInput.value = '';
+    filePill.classList.remove('on');
+    ingestBtn.disabled = true;
+    hideStatus();
+  });
+
+  // ── Ingestion ──────────────────────────────────────────────────────────────
+  ingestBtn.addEventListener('click', async () => {
+    if (!selectedFile || busy) return;
+    busy = true;
+    ingestBtn.disabled = true;
+    ingestBtn.textContent = '⏳ Ingesting…';
+    hideStatus();
+
+    const targetCollection = getSelectedCollection();
+
+    const form = new FormData();
+    form.append('file', selectedFile);
+    form.append('collection_name', targetCollection);
+
+    try {
+      const res = await fetch('/ingest/', { method: 'POST', body: form });
+      const data = await res.json();
+
+      if (!res.ok) {
+        showStatus(`❌ ${data.detail || 'Ingestion failed.'}`, 'err');
+      } else {
+        showStatus(`✅ "${data.collection_name}" — ${data.chunks_embedded} chunks embedded`, 'ok');
+        addFileEntry(selectedFile.name, data.chunks_embedded, data.collection_name);
+
+        // Refresh collections dropdown so new collection appears with chunk count
+        await loadCollections();
+        // Select the newly ingested collection
+        if ([...colSelect.options].some(o => o.value === data.collection_name)) {
+          colSelect.value = data.collection_name;
+          newColRow.classList.remove('on');
+          syncColBadge();
+        }
+
+        // Enable chat
+        hasIngested = true;
+        questionEl.disabled = false;
+        questionEl.placeholder = `Ask about "${selectedFile.name}"…`;
+        sendBtn.disabled = false;
+        emptyState.style.display = 'none';
+
+        // Clear selection ready for next file
+        clearBtn.click();
+      }
+    } catch (e) {
+      showStatus(`❌ Network error: ${e.message}`, 'err');
+    } finally {
+      busy = false;
+      ingestBtn.textContent = '⚡ Ingest Document';
+      ingestBtn.disabled = !selectedFile;
+    }
+  });
+
+  function addFileEntry(name, chunks, collection) {
+    if (!hasIngested) filesList.innerHTML = '';
+    const el = document.createElement('div');
+    el.className = 'fentry';
+    el.innerHTML = `
+      <span class="fentry-icon">📄</span>
+      <div class="fentry-info">
+        <div class="fentry-name" title="${escHtml(name)}">${escHtml(name)}</div>
+        <div class="fentry-meta">${escHtml(collection)}</div>
+      </div>
+      <span class="fentry-badge">${chunks} chunks</span>
+    `;
+    filesList.appendChild(el);
+  }
+
+  // ── Phase 3: Streaming toggle ──────────────────────────────────────────────
+  // Clicking the badge in the header toggles between streaming and regular mode.
+
+  streamBadge.addEventListener('click', () => {
+    streamingEnabled = !streamingEnabled;
+    streamBadge.classList.toggle('active', streamingEnabled);
+    streamLabel.textContent = streamingEnabled ? 'Streaming ON' : 'Streaming OFF';
+  });
+
+  // ── Chat ───────────────────────────────────────────────────────────────────
+  sendBtn.addEventListener('click', sendMessage);
+  questionEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+
+  async function sendMessage() {
+    const q = questionEl.value.trim();
+    if (!q || busy) return;
+    busy = true;
+    questionEl.value = '';
+    sendBtn.disabled = true;
+    questionEl.disabled = true;
+
+    appendMessage('user', q);
+
+    if (streamingEnabled) {
+      await sendStreaming(q);
+    } else {
+      await sendRegular(q);
+    }
+
+    busy = false;
+    sendBtn.disabled = false;
+    questionEl.disabled = false;
+    questionEl.focus();
+  }
+
+  // ── Regular (non-streaming) chat ───────────────────────────────────────────
+  async function sendRegular(q) {
+    const typingEl = appendTyping();
+    try {
+      const res = await fetch('/chat/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q, collection_name: getSelectedCollection() }),
+      });
+      const data = await res.json();
+      typingEl.remove();
+
+      if (!res.ok) {
+        appendMessage('ai', `⚠️ ${data.detail || 'Something went wrong.'}`);
+      } else {
+        modelBadge.textContent = data.model_used;
+        appendMessage('ai', data.answer, data.sources || []);
+      }
+    } catch (e) {
+      typingEl.remove();
+      appendMessage('ai', `⚠️ Network error: ${e.message}`);
+    }
+  }
+
+  // ── Phase 3: Streaming SSE chat ────────────────────────────────────────────
+  // Uses fetch() with a ReadableStream reader to consume the SSE byte stream.
+  // We don't use the EventSource API here because EventSource only supports GET,
+  // but our endpoint is POST (we need to send the question in the body).
+  //
+  // Protocol:
+  //   Each SSE frame looks like:  "data: <payload>\n\n"
+  //   - Regular token:   payload is a string (the LLM token)
+  //   - End sentinel:    payload is "[DONE]"
+  //   - Metadata frame:  payload is a JSON object {sources, model_used}
+
+  async function sendStreaming(q) {
+    // Create the AI message bubble with an empty text node + blinking cursor
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ai';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    // textNode accumulates the answer; cursor blinks while streaming
+    const textNode = document.createTextNode('');
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    bubble.appendChild(textNode);
+    bubble.appendChild(cursor);
+    wrap.appendChild(bubble);
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+
+    let fullText = '';
+    let sourcesEl = null;
+
+    try {
+      const res = await fetch('/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q, collection_name: getSelectedCollection() }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        cursor.remove();
+        textNode.textContent = `⚠️ ${err.detail || 'Stream error.'}`;
+        return;
+      }
+
+      // Read the SSE stream using the WHATWG Streams API
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE frames are separated by "\n\n". Process all complete frames.
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop(); // last element may be an incomplete frame
+
+        for (const frame of frames) {
+          if (!frame.trim()) continue;
+
+          // Strip the "data: " prefix
+          const line = frame.startsWith('data: ') ? frame.slice(6) : frame;
+
+          if (line === '[DONE]') {
+            // Token stream finished — remove the cursor
+            cursor.remove();
+            continue;
+          }
+
+          // Try to parse as JSON (metadata frame)
+          try {
+            const meta = JSON.parse(line);
+            if (meta.model_used) modelBadge.textContent = meta.model_used;
+            if (meta.sources && meta.sources.length > 0) {
+              sourcesEl = buildSources(meta.sources);
+              wrap.appendChild(sourcesEl);
+            }
+          } catch {
+            // Not JSON → it's a token. Unescape \n that was escaped for SSE framing.
+            const token = line.replace(/\\n/g, '\n');
+            fullText += token;
+            textNode.textContent = fullText;
+            messages.scrollTop = messages.scrollHeight;
+          }
+        }
+      }
+    } catch (e) {
+      cursor.remove();
+      textNode.textContent = `⚠️ Network error: ${e.message}`;
+    }
+  }
+
+  function appendMessage(role, text, sources = []) {
+    const wrap = document.createElement('div');
+    wrap.className = `msg ${role}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    wrap.appendChild(bubble);
+
+    if (sources.length > 0) {
+      wrap.appendChild(buildSources(sources));
+    }
+
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+    return wrap;
+  }
+
+  function appendTyping() {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ai';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = `<div class="typing"><span></span><span></span><span></span></div>`;
+    wrap.appendChild(bubble);
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+    return wrap;
+  }
+
+  function buildSources(sources) {
+    const container = document.createElement('div');
+    container.className = 'sources';
+
+    const toggle = document.createElement('button');
+    toggle.className = 'sources-toggle';
+    toggle.innerHTML = `<span class="arrow">▶</span> ${sources.length} source${sources.length !== 1 ? 's' : ''} used`;
+
+    const list = document.createElement('div');
+    list.className = 'sources-list';
+
+    sources.forEach((src) => {
+      const dist = typeof src.distance === 'number' ? src.distance : 1;
+      const distClass = dist < 0.3 ? 'dist-good' : dist < 0.55 ? 'dist-mid' : 'dist-far';
+      const item = document.createElement('div');
+      item.className = 'src-item';
+      item.innerHTML = `
+        <div class="src-top">
+          <span class="dist-badge ${distClass}">dist ${dist.toFixed(3)}</span>
+          <span class="src-meta">${escHtml(src.metadata?.source ?? '?')} · chunk ${src.metadata?.chunk_index ?? '?'}</span>
+        </div>
+        <div class="src-text">${escHtml(src.content)}</div>
+      `;
+      list.appendChild(item);
+    });
+
+    toggle.addEventListener('click', () => {
+      toggle.classList.toggle('open');
+      list.classList.toggle('on');
+    });
+
+    container.appendChild(toggle);
+    container.appendChild(list);
+    return container;
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function showStatus(msg, type) {
+    ingestStatus.textContent = msg;
+    ingestStatus.className = type;
+  }
+  function hideStatus() {
+    ingestStatus.className = '';
+    ingestStatus.style.display = 'none';
+    setTimeout(() => { if (!ingestStatus.className) ingestStatus.style.display = ''; }, 0);
+  }
+  function formatSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  }
+  function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>

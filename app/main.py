@@ -11,14 +11,19 @@ This file:
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import ollama
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
-from app.routers import chat, ingest
+from app.routers import chat, collections, ingest
 from app.services.vector_store import get_client
+
+STATIC_DIR = Path(__file__).parent.parent / "static"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,18 +110,19 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(ingest.router)
 app.include_router(chat.router)
+app.include_router(collections.router)
 
 
-# ── Health Checks ─────────────────────────────────────────────────────────────
+# ── Static UI ─────────────────────────────────────────────────────────────────
+# Serve static assets (CSS, JS, images) if you ever split them out.
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-@app.get("/", tags=["🩺 Health"], summary="Root health check")
-async def root():
-    """Confirm the API is running."""
-    return {
-        "status": "ok",
-        "message": "FastAPI RAG API is running.",
-        "docs": "http://localhost:8000/docs",
-    }
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.get("/", include_in_schema=False)
+async def serve_ui():
+    """Serve the RAG Explorer web UI."""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health", tags=["🩺 Health"], summary="Detailed health check")

@@ -11,6 +11,15 @@ from pydantic import BaseModel, Field
 from typing import List
 
 
+# ── Collections ───────────────────────────────────────────────────────────────
+
+class CollectionInfo(BaseModel):
+    """Summary of a single ChromaDB collection."""
+
+    name: str = Field(..., description="Collection name.")
+    count: int = Field(..., description="Number of embedded chunks stored.")
+
+
 # ── Ingestion ─────────────────────────────────────────────────────────────────
 
 class IngestResponse(BaseModel):

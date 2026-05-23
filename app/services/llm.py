@@ -35,6 +35,8 @@ via Ollama — no internet connection needed after the initial `ollama pull`.
 Pull it once with: ollama pull llama3.2
 """
 
+from collections.abc import AsyncGenerator
+
 import ollama
 from app.config import get_settings
 
@@ -112,3 +114,47 @@ def generate_answer(question: str, context_chunks: list[str]) -> str:
 
     # response["message"]["content"] is the assistant's reply text
     return response["message"]["content"]
+
+
+async def generate_answer_stream(
+    question: str, context_chunks: list[str]
+) -> AsyncGenerator[str, None]:
+    """
+    Stream an answer token-by-token from Ollama using an async generator.
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    HOW OLLAMA STREAMING WORKS
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    When stream=True, ollama.chat() returns an iterator of partial response
+    objects. Each chunk has a 'message' dict with a 'content' key containing
+    the next token(s). We yield each token so the caller can forward it to
+    the client immediately — no waiting for the full response.
+
+    This is an *async* generator (uses `yield`) so FastAPI's StreamingResponse
+    can await each token without blocking the event loop.
+
+    Args:
+        question:       The user's question.
+        context_chunks: Retrieved document chunks to use as context.
+
+    Yields:
+        Individual token strings as they are produced by the LLM.
+    """
+    settings = get_settings()
+    prompt = build_rag_prompt(question, context_chunks)
+
+    # stream=True makes Ollama return tokens incrementally.
+    # The SDK returns a synchronous iterator, so we wrap it to stay async-friendly.
+    stream = ollama.chat(
+        model=settings.ollama_chat_model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        stream=True,
+    )
+
+    for chunk in stream:
+        token = chunk["message"]["content"]
+        if token:  # skip empty tokens
+            yield token
